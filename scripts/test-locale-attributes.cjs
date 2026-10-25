@@ -1,0 +1,10 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const source=fs.readFileSync(path.join(__dirname,'../locales.js'),'utf8');
+const start=source.indexOf('maps.es=');const end=source.indexOf('\nfunction apply(',start);assert(start>=0&&end>start);
+const context={maps:{fr:{Search:'Rechercher',Close:'Fermer'}}};vm.createContext(context);vm.runInContext(source.slice(start,end)+';globalThis.translateAttributes=translateAttributes;',context);
+const attrs=new Map([['placeholder','Search'],['title','Close'],['aria-label','Language']]);const el={hasAttribute:k=>attrs.has(k),getAttribute:k=>attrs.get(k),setAttribute:(k,v)=>attrs.set(k,v)};const root={querySelectorAll:()=>[el]};
+context.translateAttributes(root,'fr');assert.equal(attrs.get('placeholder'),'Rechercher');assert.equal(attrs.get('title'),'Fermer');
+context.translateAttributes(root,'en');assert.equal(attrs.get('placeholder'),'Search');assert.equal(attrs.get('title'),'Close');assert.equal(attrs.get('aria-label'),'Language');
+context.translateAttributes(root,'es');assert.equal(attrs.get('placeholder'),'Buscar');assert.equal(attrs.get('title'),'Cerrar');assert.equal(attrs.get('aria-label'),'Idioma');
+context.translateAttributes(root,'en');assert.deepEqual([...attrs.values()],['Search','Close','Language']);
+console.log('9 locale attribute assertions passed; synthetic DOM only');
