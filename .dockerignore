@@ -10,3 +10,7 @@ assets/media/source/
 .env
 .env.*
 !.env.production.example
+
+# Exclude local source backups
+*.bak
+**/*.bak

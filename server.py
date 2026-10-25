@@ -32,11 +32,18 @@ def password_ok(password: str, stored: str) -> bool:
         return hmac.compare_digest(actual, expected)
     except (ValueError, TypeError): return False
 
+class ClosingSQLiteConnection(sqlite3.Connection):
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
 class Store:
     def __init__(self, path: Path):
         self.path=path; path.parent.mkdir(parents=True, exist_ok=True); self.lock=threading.RLock(); self.init()
     def connect(self):
-        db=sqlite3.connect(self.path,timeout=10); db.row_factory=sqlite3.Row; db.execute("PRAGMA foreign_keys=ON"); db.execute("PRAGMA busy_timeout=10000"); return db
+        db=sqlite3.connect(self.path,timeout=10,factory=ClosingSQLiteConnection); db.row_factory=sqlite3.Row; db.execute("PRAGMA foreign_keys=ON"); db.execute("PRAGMA busy_timeout=10000"); return db
     def init(self):
         schema="""
         CREATE TABLE IF NOT EXISTS tenants(id TEXT PRIMARY KEY,name TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1);
@@ -244,6 +251,12 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s or s["role"] not in {"admin","consultant"}:return self.json(403,{"error":"Authorized analytics role required"})
             return self.json(200,{"events":self.app.store.all("SELECT event,region,language,count(*) total FROM analytics_events GROUP BY event,region,language ORDER BY total DESC"),"advice":self.app.store.all("SELECT industry,region,service,status,count(*) total FROM advice_requests GROUP BY industry,region,service,status ORDER BY total DESC")})
+        if path=="/api/admin/users":
+            s=self.session()
+            if not s:return self.json(401,{"error":"Authentication required"})
+            if s["role"]!="admin":return self.json(403,{"error":"Administrator access required"})
+            users=self.app.store.all("SELECT u.id,u.tenant_id,t.name tenant_name,u.email,u.name,u.role,u.active,u.mfa_state,u.created_at FROM users u JOIN tenants t ON t.id=u.tenant_id ORDER BY t.name,u.name,u.email")
+            return self.json(200,{"users":users,"count":len(users)})
         if path=="/api/portal":
             s=self.session()
             if not s:return self.json(401,{"error":"Authentication required"})
@@ -437,7 +450,7 @@ class Handler(BaseHTTPRequestHandler):
     def static(self,path):
         rel="index.html" if path in {"","/"} else path.lstrip("/"); dest=(self.app.root/rel).resolve()
         if self.app.root!=dest and self.app.root not in dest.parents:return self.json(403,{"error":"Invalid path"})
-        if any(part.startswith(".") for part in Path(rel).parts) or dest.suffix.lower() in {".py",".db",".sqlite3",".pem",".p7m",".log",".yml",".yaml"}:return self.json(403,{"error":"Internal file is not publicly served"})
+        if any(part.startswith(".") for part in Path(rel).parts) or dest.suffix.lower() in {".py",".db",".sqlite3",".pem",".p7m",".log",".yml",".yaml",".bak"}:return self.json(403,{"error":"Internal file is not publicly served"})
         if not dest.is_file():return self.json(404,{"error":"Not found"})
         if "assets/media/source" in dest.as_posix():return self.json(403,{"error":"Internal reference media is not publicly served"})
         body=dest.read_bytes();self.send_response(200);self.security_headers(mimetypes.guess_type(dest.name)[0] or "application/octet-stream");self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body)
